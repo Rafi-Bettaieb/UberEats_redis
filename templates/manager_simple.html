@@ -21,37 +21,72 @@
             border-left: 4px solid #28a745;
             background-color: #f8fff9;
         }
+        .notification-container {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .cancelled-order {
+            opacity: 0.7;
+            background-color: #f8f9fa;
+        }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark bg-warning">
         <div class="container">
             <span class="navbar-brand">🧠 Manager - {{ username }}</span>
-            <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Déconnexion</a>
+            <div class="d-flex">
+                <span class="navbar-text me-3" id="connectionStatus">🟢 Connecté</span>
+                <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Déconnexion</a>
+            </div>
         </div>
     </nav>
+
+    <!-- Container pour les notifications -->
+    <div class="notification-container" id="notificationContainer"></div>
 
     <div class="container mt-4">
         <div class="row">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header">
-                        <h4>📋 Toutes les Commandes</h4>
-                        <small class="text-muted">Cliquez sur une commande pour assigner un livreur</small>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <h4 class="mb-0">📋 Toutes les Commandes</h4>
+                            <small class="text-muted">Cliquez sur une commande pour assigner un livreur</small>
+                        </div>
+                        <div class="text-end">
+                            <small class="text-muted" id="lastUpdate"></small>
+                            <br>
+                            <span class="badge bg-info" id="activeOrdersCount">{{ all_orders|length }} commande(s)</span>
+                        </div>
                     </div>
                     <div class="card-body">
-                        <div class="row">
+                        <div class="row" id="ordersContainer">
                             {% for order in all_orders %}
                             <div class="col-md-6 mb-3">
                                 <div class="card order-card 
-                                    {% if order.status == 'ready' %} border-warning
+                                    {% if order.status == 'ready' and get_candidates_count(order.id) > 0 %} border-warning pulse
+                                    {% elif order.status == 'ready' %} border-warning
                                     {% elif order.status == 'assigned' %} border-primary
                                     {% elif order.status == 'delivered' %} border-success
+                                    {% elif order.status == 'cancelled' %} border-danger cancelled-order
                                     {% else %} border-secondary
                                     {% endif %}"
                                     onclick="showCandidates('{{ order.id }}')"
                                     data-bs-toggle="modal" 
-                                    data-bs-target="#candidatesModal">
+                                    data-bs-target="#candidatesModal"
+                                    id="order-{{ order.id }}">
                                     
                                     <div class="card-body">
                                         <div class="d-flex justify-content-between align-items-start">
@@ -66,7 +101,9 @@
                                                 <div class="mt-2">
                                                     {% set candidates_count = get_candidates_count(order.id) %}
                                                     {% if candidates_count > 0 %}
-                                                        <span class="badge bg-success">{{ candidates_count }} livreur(s) intéressé(s)</span>
+                                                        <span class="badge bg-success" id="candidate-count-{{ order.id }}">
+                                                            {{ candidates_count }} livreur(s) intéressé(s)
+                                                        </span>
                                                     {% else %}
                                                         <span class="badge bg-warning">En attente des livreurs</span>
                                                     {% endif %}
@@ -79,12 +116,14 @@
                                                     {% elif order.status == 'ready' %}bg-warning
                                                     {% elif order.status == 'assigned' %}bg-info
                                                     {% elif order.status == 'delivered' %}bg-success
-                                                    {% else %}bg-dark{% endif %}">
+                                                    {% elif order.status == 'cancelled' %}bg-danger
+                                                    {% else %}bg-dark{% endif %}"
+                                                    id="status-{{ order.id }}">
                                                     {{ order.status }}
                                                 </span>
                                                 {% if order.assigned_driver %}
                                                 <br>
-                                                <small class="text-muted">Livreur: {{ order.assigned_driver }}</small>
+                                                <small class="text-muted" id="driver-{{ order.id }}">Livreur: {{ order.assigned_driver }}</small>
                                                 {% endif %}
                                             </div>
                                         </div>
@@ -93,6 +132,13 @@
                             </div>
                             {% endfor %}
                         </div>
+                        
+                        {% if not all_orders %}
+                        <div class="text-center text-muted py-5">
+                            <h5>📭 Aucune commande</h5>
+                            <p>Les commandes apparaîtront ici lorsqu'elles seront créées.</p>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -126,6 +172,7 @@
 
     <script>
         let currentOrderId = null;
+        let eventSource = null;
         
         function showCandidates(orderId) {
             currentOrderId = orderId;
@@ -247,10 +294,8 @@
                         const modal = bootstrap.Modal.getInstance(document.getElementById('candidatesModal'));
                         modal.hide();
                         
-                        // Rafraîchir la page pour voir les changements
-                        setTimeout(() => {
-                            location.reload();
-                        }, 500);
+                        // Mettre à jour l'interface
+                        updateOrderStatus(orderId, 'assigned', livreurId);
                     } else {
                         alert('Erreur: ' + (data.message || 'Impossible d\'assigner le livreur'));
                     }
@@ -262,15 +307,213 @@
             }
         }
         
-        // Rafraîchir la page toutes les 30 secondes pour les mises à jour
-        setInterval(() => {
-            location.reload();
-        }, 30000);
+        function updateOrderStatus(orderId, status, driverId = null) {
+            // Mettre à jour le badge de statut
+            const statusBadge = document.getElementById(`status-${orderId}`);
+            if (statusBadge) {
+                statusBadge.textContent = status;
+                statusBadge.className = 'badge ' + (
+                    status === 'pending' ? 'bg-secondary' :
+                    status === 'ready' ? 'bg-warning' :
+                    status === 'assigned' ? 'bg-info' :
+                    status === 'delivered' ? 'bg-success' :
+                    status === 'cancelled' ? 'bg-danger' : 'bg-dark'
+                );
+            }
+            
+            // Mettre à jour le livreur assigné
+            if (driverId) {
+                const driverElement = document.getElementById(`driver-${orderId}`);
+                if (driverElement) {
+                    driverElement.textContent = `Livreur: ${driverId}`;
+                } else {
+                    // Créer l'élément si il n'existe pas
+                    const statusContainer = document.getElementById(`status-${orderId}`).parentNode;
+                    const driverSpan = document.createElement('small');
+                    driverSpan.className = 'text-muted';
+                    driverSpan.id = `driver-${orderId}`;
+                    driverSpan.textContent = `Livreur: ${driverId}`;
+                    statusContainer.appendChild(document.createElement('br'));
+                    statusContainer.appendChild(driverSpan);
+                }
+            }
+            
+            // Retirer l'animation pulse et les indicateurs
+            const orderCard = document.getElementById(`order-${orderId}`);
+            if (orderCard) {
+                orderCard.classList.remove('pulse', 'border-warning');
+                orderCard.classList.add('border-primary');
+                
+                if (status === 'cancelled') {
+                    orderCard.classList.add('cancelled-order');
+                }
+            }
+            
+            // Retirer le compteur de candidats
+            const candidateCount = document.getElementById(`candidate-count-${orderId}`);
+            if (candidateCount) {
+                candidateCount.remove();
+            }
+        }
+        
+        // Connexion aux événements temps réel
+        function connectToEvents() {
+            eventSource = new EventSource('/events');
+            
+            eventSource.onopen = function() {
+                document.getElementById('connectionStatus').textContent = '🟢 Connecté';
+                document.getElementById('connectionStatus').className = 'navbar-text me-3 text-success';
+            };
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log('Événement reçu:', data);
+                
+                // Mettre à jour l'heure de dernière mise à jour
+                document.getElementById('lastUpdate').textContent = 'Dernière mise à jour: ' + new Date().toLocaleTimeString();
+                
+                switch(data.type) {
+                    case 'driver_interest':
+                        showNewCandidateNotification(data.data);
+                        updateCandidateCount(data.data.order_id, 1);
+                        break;
+                    case 'manager_decision_started':
+                        showManagerDecisionNotification(data.data);
+                        break;
+                    case 'auto_assignment':
+                        showAutoAssignmentNotification(data.data);
+                        updateOrderStatus(data.data.order_id, 'assigned', data.data.driver_id);
+                        break;
+                    case 'driver_assigned':
+                        showDriverAssignedNotification(data.data);
+                        updateOrderStatus(data.data.order_id, 'assigned', data.data.driver_id);
+                        break;
+                    case 'order_delivered':
+                        updateOrderStatus(data.data.order_id, 'delivered');
+                        break;
+                    case 'order_cancelled':
+                        showOrderCancelledNotification(data.data);
+                        updateOrderStatus(data.data.order_id, 'cancelled');
+                        break;
+                }
+            };
+            
+            eventSource.onerror = function(event) {
+                document.getElementById('connectionStatus').textContent = '🔴 Déconnecté';
+                document.getElementById('connectionStatus').className = 'navbar-text me-3 text-danger';
+                
+                console.log('Erreur SSE, reconnexion...');
+                setTimeout(connectToEvents, 5000);
+            };
+        }
+        
+        function showNewCandidateNotification(data) {
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-info alert-dismissible fade show';
+            notification.innerHTML = `
+                <strong>📬 Nouveau livreur intéressé!</strong>
+                <br>${data.driver_id} (⭐ ${data.driver_score}) pour la commande #${data.order_id}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.getElementById('notificationContainer').appendChild(notification);
+            
+            // Auto-supprimer après 5 secondes
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 5000);
+        }
+        
+        function showManagerDecisionNotification(data) {
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-warning alert-dismissible fade show';
+            notification.innerHTML = `
+                <strong>⏰ Décision requise!</strong>
+                <br>La commande #${data.order_id} a ${data.candidates_count} candidat(s)
+                <br><small>Vous avez 60 secondes pour choisir un livreur</small>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.getElementById('notificationContainer').appendChild(notification);
+        }
+        
+        function showAutoAssignmentNotification(data) {
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-success alert-dismissible fade show';
+            notification.innerHTML = `
+                <strong>🤖 Attribution automatique</strong>
+                <br>Commande #${data.order_id} assignée à ${data.driver_id} (⭐ ${data.score})
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.getElementById('notificationContainer').appendChild(notification);
+        }
+        
+        function showDriverAssignedNotification(data) {
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-primary alert-dismissible fade show';
+            notification.innerHTML = `
+                <strong>✅ Livreur assigné</strong>
+                <br>Commande #${data.order_id} assignée à ${data.driver_id}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.getElementById('notificationContainer').appendChild(notification);
+        }
+        
+        function showOrderCancelledNotification(data) {
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-danger alert-dismissible fade show';
+            notification.innerHTML = `
+                <strong>❌ Commande annulée</strong>
+                <br>Commande #${data.order_id} annulée par le client
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.getElementById('notificationContainer').appendChild(notification);
+        }
+        
+        function updateCandidateCount(orderId, increment = 1) {
+            const candidateCount = document.getElementById(`candidate-count-${orderId}`);
+            if (candidateCount) {
+                const currentCount = parseInt(candidateCount.textContent) || 0;
+                candidateCount.textContent = (currentCount + increment) + ' livreur(s) intéressé(s)';
+            } else {
+                // Créer le compteur si il n'existe pas
+                const orderCard = document.getElementById(`order-${orderId}`);
+                if (orderCard) {
+                    const countBadge = document.createElement('span');
+                    countBadge.className = 'badge bg-success';
+                    countBadge.id = `candidate-count-${orderId}`;
+                    countBadge.textContent = increment + ' livreur(s) intéressé(s)';
+                    
+                    const mt2Div = orderCard.querySelector('.mt-2');
+                    if (mt2Div) {
+                        mt2Div.innerHTML = '';
+                        mt2Div.appendChild(countBadge);
+                    }
+                }
+            }
+        }
+        
+        // Initialisation
+        document.getElementById('lastUpdate').textContent = 'Dernière mise à jour: ' + new Date().toLocaleTimeString();
+        connectToEvents();
         
         // Gestion de la fermeture du modal
         document.getElementById('candidatesModal').addEventListener('hidden.bs.modal', function () {
             currentOrderId = null;
         });
+        
+        // Nettoyer à la fermeture de la page
+        window.addEventListener('beforeunload', function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+        
+        // Rafraîchissement manuel toutes les 30 secondes pour synchronisation
+        setInterval(() => {
+            location.reload();
+        }, 30000);
     </script>
 </body>
 </html>

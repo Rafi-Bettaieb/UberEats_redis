@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, Response
 import redis
 import hashlib
 import uuid
 import time
 import threading
+import json
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -35,6 +36,15 @@ def init_test_users():
     }
     for livreur, score in livreur_scores.items():
         r.zadd("livreurs:scores", {livreur: score})
+
+def publish_event(event_type, data):
+    """Publie un événement sur le canal Redis"""
+    event_data = {
+        'type': event_type,
+        'data': data,
+        'timestamp': datetime.now().isoformat()
+    }
+    r.publish('system_events', json.dumps(event_data))
 
 def get_livreur_score(livreur_id):
     score = r.zscore("livreurs:scores", livreur_id)
@@ -98,11 +108,9 @@ def dashboard():
         orders = get_client_orders(username)
         return render_template('client_simple.html', username=username, orders=orders)
     elif role == 'manager':
-        pending_decisions = get_pending_decisions()
         all_orders = get_all_orders_with_details()
         return render_template('manager_simple.html', 
-                             username=username, 
-                             pending_decisions=pending_decisions,
+                             username=username,
                              all_orders=all_orders,
                              get_livreur_score=get_livreur_score)
     elif role == 'restaurant':
@@ -133,6 +141,7 @@ def passer_commande():
         }
         
         r.hset(f"order:{id_commande}", mapping=details_commande)
+        publish_event('order_created', {'order_id': id_commande, 'details': details_commande})
         return {'status': 'success', 'order_id': id_commande}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
@@ -143,19 +152,198 @@ def marquer_prete(order_id):
         # Marquer la commande comme prête
         r.hset(f"order:{order_id}", "status", "ready")
         
-        # Démarrer la fenêtre de 60s pour les livreurs avec timestamp
-        expiration_time = datetime.now() + timedelta(seconds=60)
-        r.hset(f"order_timer:{order_id}", 
-               mapping={
-                   "type": "acceptance_window",
-                   "expires_at": expiration_time.isoformat(),
-                   "status": "active",
-                   "created_at": datetime.now().isoformat()
-               })
-        r.expire(f"order_timer:{order_id}", 60)
+        # Démarrer la fenêtre de 60s pour les livreurs
+        start_acceptance_window(order_id)
         
         print(f"✅ Fenêtre d'acceptation ouverte pour {order_id}")
-        return {'status': 'success', 'expires_at': expiration_time.isoformat()}
+        return {'status': 'success'}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+def start_acceptance_window(order_id):
+    """Démarre la fenêtre d'acceptation de 60s pour les livreurs"""
+    expiration_time = datetime.now() + timedelta(seconds=60)
+    r.hset(f"order_timer:{order_id}", 
+           mapping={
+               "type": "acceptance_window",
+               "expires_at": expiration_time.isoformat(),
+               "status": "active",
+               "created_at": datetime.now().isoformat()
+           })
+    r.expire(f"order_timer:{order_id}", 60)
+    
+    # Programmer l'expiration pour déclencher la décision manager
+    schedule_manager_decision(order_id, 60)
+    
+    publish_event('order_ready', {
+        'order_id': order_id,
+        'expires_at': expiration_time.isoformat()
+    })
+
+def schedule_manager_decision(order_id, delay_seconds):
+    """Programme la décision du manager après un délai"""
+    def start_manager_decision():
+        time.sleep(delay_seconds)
+        
+        # Vérifier si la commande existe toujours et n'est pas déjà assignée
+        order_data = r.hgetall(f"order:{order_id}")
+        if not order_data or order_data.get('status') != 'ready':
+            return
+            
+        candidates = r.lrange(f"candidates:{order_id}", 0, -1)
+        
+        if candidates:
+            # Démarrer la fenêtre de décision du manager (60s)
+            expiration_time = datetime.now() + timedelta(seconds=60)
+            r.hset(f"order_timer:{order_id}", 
+                   mapping={
+                       "type": "manager_decision",
+                       "expires_at": expiration_time.isoformat(),
+                       "status": "active"
+                   })
+            r.expire(f"order_timer:{order_id}", 60)
+            
+            publish_event('manager_decision_started', {
+                'order_id': order_id,
+                'candidates_count': len(candidates),
+                'expires_at': expiration_time.isoformat()
+            })
+            
+            print(f"🔄 Fenêtre manager démarrée pour {order_id} avec {len(candidates)} candidats")
+            
+            # Programmer l'attribution automatique
+            schedule_auto_assignment(order_id, 60)
+        else:
+            publish_event('no_candidates', {'order_id': order_id})
+            print(f"❌ Aucun candidat pour {order_id}")
+    
+    thread = threading.Thread(target=start_manager_decision, daemon=True)
+    thread.start()
+
+def schedule_auto_assignment(order_id, delay_seconds):
+    """Programme l'attribution automatique après un délai"""
+    def auto_assign():
+        time.sleep(delay_seconds)
+        
+        # Vérifier si la commande existe toujours et n'est pas déjà assignée
+        order_data = r.hgetall(f"order:{order_id}")
+        if not order_data or order_data.get('status') != 'ready':
+            return
+            
+        candidates = r.lrange(f"candidates:{order_id}", 0, -1)
+        
+        if candidates:
+            # Attribution automatique au meilleur livreur
+            best_livreur = None
+            best_score = -1
+            
+            for candidate in candidates:
+                score = r.zscore("livreurs:scores", candidate) or 0
+                if score > best_score:
+                    best_score = score
+                    best_livreur = candidate
+            
+            if best_livreur:
+                # Assigner la commande
+                r.hset(f"order:{order_id}", "status", "assigned")
+                r.hset(f"order:{order_id}", "assigned_driver", best_livreur)
+                r.delete(f"candidates:{order_id}")
+                r.delete(f"order_timer:{order_id}")
+                
+                publish_event('auto_assignment', {
+                    'order_id': order_id,
+                    'driver_id': best_livreur,
+                    'score': best_score
+                })
+                
+                print(f"🤖 Attribution automatique: {order_id} -> {best_livreur} (score: {best_score})")
+    
+    thread = threading.Thread(target=auto_assign, daemon=True)
+    thread.start()
+
+@app.route('/montrer_interet/<order_id>', methods=['POST'])
+def montrer_interet(order_id):
+    try:
+        livreur = session.get('username')
+        
+        # Vérifier si la fenêtre d'acceptation est encore ouverte
+        timer_data = r.hgetall(f"order_timer:{order_id}")
+        if not timer_data or timer_data.get('type') != 'acceptance_window':
+            return {'status': 'error', 'message': 'Fenêtre d\'acceptation fermée'}
+        
+        # Ajouter le livreur à la liste des candidats
+        r.rpush(f"candidates:{order_id}", livreur)
+        
+        publish_event('driver_interest', {
+            'order_id': order_id,
+            'driver_id': livreur,
+            'driver_score': get_livreur_score(livreur)
+        })
+        
+        print(f"✅ {livreur} a montré son intérêt pour {order_id}")
+        return {'status': 'success'}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+@app.route('/choisir_livreur/<order_id>/<livreur>', methods=['POST'])
+def choisir_livreur(order_id, livreur):
+    try:
+        # Assigner la commande au livreur
+        r.hset(f"order:{order_id}", "status", "assigned")
+        r.hset(f"order:{order_id}", "assigned_driver", livreur)
+        
+        # Supprimer les candidats et les timers
+        r.delete(f"candidates:{order_id}")
+        r.delete(f"order_timer:{order_id}")
+        
+        publish_event('driver_assigned', {
+            'order_id': order_id,
+            'driver_id': livreur,
+            'assigned_by': session.get('username')
+        })
+        
+        print(f"✅ Manager a choisi {livreur} pour {order_id}")
+        return {'status': 'success'}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+@app.route('/marquer_livree/<order_id>', methods=['POST'])
+def marquer_livree(order_id):
+    try:
+        r.hset(f"order:{order_id}", "status", "delivered")
+        
+        publish_event('order_delivered', {
+            'order_id': order_id,
+            'driver_id': r.hget(f"order:{order_id}", "assigned_driver")
+        })
+        
+        print(f"✅ Commande {order_id} livrée")
+        return {'status': 'success'}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+@app.route('/get_order_candidates/<order_id>')
+def get_order_candidates(order_id):
+    """Récupère les candidats pour une commande spécifique"""
+    try:
+        candidates = r.lrange(f"candidates:{order_id}", 0, -1)
+        candidates_with_scores = []
+        
+        for candidate in candidates:
+            score = get_livreur_score(candidate)
+            candidates_with_scores.append({
+                'id': candidate,
+                'score': score
+            })
+        
+        # Trier par score décroissant
+        candidates_with_scores.sort(key=lambda x: x['score'], reverse=True)
+        
+        return {
+            'status': 'success', 
+            'candidates': candidates_with_scores,
+            'order_status': r.hget(f"order:{order_id}", "status")
+        }
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
@@ -179,79 +367,77 @@ def get_timer_status(order_id):
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
-@app.route('/montrer_interet/<order_id>', methods=['POST'])
-def montrer_interet(order_id):
-    try:
-        livreur = session.get('username')
+@app.route('/events')
+def events():
+    """Endpoint Server-Sent Events pour les mises à jour en temps réel"""
+    def generate():
+        pubsub = r.pubsub()
+        pubsub.subscribe('system_events')
         
-        # Vérifier si la fenêtre d'acceptation est encore ouverte
-        timer_data = r.hgetall(f"order_timer:{order_id}")
-        if not timer_data or timer_data.get('type') != 'acceptance_window':
-            return {'status': 'error', 'message': 'Fenêtre d\'acceptation fermée'}
+        yield "data: {}\n\n".format(json.dumps({'type': 'connected'}))
         
-        # Ajouter le livreur à la liste des candidats
-        r.rpush(f"candidates:{order_id}", livreur)
-        print(f"✅ {livreur} a montré son intérêt pour {order_id}")
-        
-        return {'status': 'success'}
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-@app.route('/choisir_livreur/<order_id>/<livreur>', methods=['POST'])
-def choisir_livreur(order_id, livreur):
-    try:
-        # Assigner la commande au livreur
-        r.hset(f"order:{order_id}", "status", "assigned")
-        r.hset(f"order:{order_id}", "assigned_driver", livreur)
-        
-        # Supprimer les candidats et les timers
-        r.delete(f"candidates:{order_id}")
-        r.delete(f"order_timer:{order_id}")
-        
-        print(f"✅ Manager a choisi {livreur} pour {order_id}")
-        return {'status': 'success'}
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-@app.route('/marquer_livree/<order_id>', methods=['POST'])
-def marquer_livree(order_id):
-    try:
-        r.hset(f"order:{order_id}", "status", "delivered")
-        print(f"✅ Commande {order_id} livrée")
-        return {'status': 'success'}
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-@app.route('/get_orders_status')
-def get_orders_status():
-    """Endpoint pour debuguer l'état des commandes"""
-    orders_info = []
-    for key in r.keys("order:*"):
-        order_data = r.hgetall(key)
-        timer_data = r.hgetall(f"order_timer:{order_data['id']}")
-        candidates = r.lrange(f"candidates:{order_data['id']}", 0, -1)
-        
-        orders_info.append({
-            'order': order_data,
-            'timer': timer_data,
-            'candidates': candidates
-        })
+        for message in pubsub.listen():
+            if message['type'] == 'message':
+                yield "data: {}\n\n".format(message['data'])
     
-    return jsonify(orders_info)
+    return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/debug_timers')
 def debug_timers():
-    """Page de debug pour voir tous les timers"""
-    timers = []
+    """Page de debug pour voir l'état des timers"""
+    timers_info = []
     for key in r.keys("order_timer:*"):
-        timer_data = r.hgetall(key)
         order_id = key.split(":")[1]
-        timers.append({
+        timer_data = r.hgetall(key)
+        candidates = r.lrange(f"candidates:{order_id}", 0, -1)
+        order_data = r.hgetall(f"order:{order_id}")
+        
+        timers_info.append({
             'order_id': order_id,
-            'data': timer_data
+            'timer': timer_data,
+            'candidates': candidates,
+            'order_status': order_data.get('status') if order_data else 'unknown'
         })
     
-    return jsonify(timers)
+    return jsonify(timers_info)
+
+@app.route('/force_auto_assign/<order_id>', methods=['POST'])
+def force_auto_assign(order_id):
+    """Forcer l'attribution automatique (pour tests)"""
+    try:
+        candidates = r.lrange(f"candidates:{order_id}", 0, -1)
+        
+        if not candidates:
+            return {'status': 'error', 'message': 'Aucun candidat'}
+            
+        # Attribution automatique au meilleur livreur
+        best_livreur = None
+        best_score = -1
+        
+        for candidate in candidates:
+            score = r.zscore("livreurs:scores", candidate) or 0
+            if score > best_score:
+                best_score = score
+                best_livreur = candidate
+        
+        if best_livreur:
+            r.hset(f"order:{order_id}", "status", "assigned")
+            r.hset(f"order:{order_id}", "assigned_driver", best_livreur)
+            r.delete(f"candidates:{order_id}")
+            r.delete(f"order_timer:{order_id}")
+            
+            publish_event('auto_assignment', {
+                'order_id': order_id,
+                'driver_id': best_livreur,
+                'score': best_score
+            })
+            
+            return {'status': 'success', 'assigned_to': best_livreur}
+        else:
+            return {'status': 'error', 'message': 'Aucun livreur valide'}
+            
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
 
 @app.route('/logout')
 def logout():
@@ -266,41 +452,6 @@ def get_client_orders(username):
         if order_data.get('client') == username:
             orders.append(order_data)
     return orders
-
-def get_pending_decisions():
-    """Récupère les commandes qui attendent une décision du manager"""
-    decisions = []
-    for key in r.keys("order_timer:*"):
-        timer_data = r.hgetall(key)
-        order_id = key.split(":")[1]
-        
-        # Vérifier si c'est une fenêtre manager active OU si la commande est ready avec des candidats
-        if (timer_data.get('type') == 'manager_decision' or 
-            (timer_data.get('type') == 'acceptance_window' and r.llen(f"candidates:{order_id}") > 0)):
-            
-            order_data = r.hgetall(f"order:{order_id}")
-            candidates = r.lrange(f"candidates:{order_id}", 0, -1)
-            
-            if order_data and order_data.get('status') == 'ready':
-                # Ajouter les scores des candidats
-                candidates_with_scores = []
-                for candidate in candidates:
-                    score = get_livreur_score(candidate)
-                    candidates_with_scores.append({
-                        'id': candidate,
-                        'score': score
-                    })
-                
-                # Trier par score
-                candidates_with_scores.sort(key=lambda x: x['score'], reverse=True)
-                
-                decisions.append({
-                    'order': order_data,
-                    'candidates': candidates_with_scores,
-                    'timer_type': timer_data.get('type', 'unknown')
-                })
-    
-    return decisions
 
 def get_restaurant_orders():
     orders = []
@@ -332,92 +483,38 @@ def get_my_interests(username):
                 interests.append(order_data)
     return interests
 
-# Thread pour gérer les expirations de timers
-def start_timer_listener():
-    def check_expirations():
-        while True:
-            try:
-                # Vérifier les fenêtres d'acceptation qui expirent
-                for key in r.keys("order_timer:*"):
-                    timer_data = r.hgetall(key)
-                    order_id = key.split(":")[1]
-                    
-                    if timer_data.get('type') == 'acceptance_window':
-                        # Vérifier si le timer a expiré
-                        if not r.exists(key):
-                            candidates = r.lrange(f"candidates:{order_id}", 0, -1)
-                            
-                            if candidates:
-                                # Démarrer la fenêtre de décision du manager (60s)
-                                expiration_time = datetime.now() + timedelta(seconds=60)
-                                r.hset(f"order_timer:{order_id}", 
-                                       mapping={
-                                           "type": "manager_decision",
-                                           "expires_at": expiration_time.isoformat(),
-                                           "status": "active"
-                                       })
-                                r.expire(f"order_timer:{order_id}", 60)
-                                print(f"🔄 Fenêtre manager démarrée pour {order_id} avec {len(candidates)} candidats")
-                            else:
-                                print(f"❌ Aucun candidat pour {order_id}")
-                
-                # Vérifier les décisions manager qui expirent
-                for key in r.keys("order_timer:*"):
-                    timer_data = r.hgetall(key)
-                    order_id = key.split(":")[1]
-                    
-                    if timer_data.get('type') == 'manager_decision':
-                        # Vérifier si le timer a expiré
-                        if not r.exists(key):
-                            candidates = r.lrange(f"candidates:{order_id}", 0, -1)
-                            
-                            if candidates:
-                                # Attribution automatique au meilleur livreur
-                                best_livreur = None
-                                best_score = -1
-                                
-                                for candidate in candidates:
-                                    score = r.zscore("livreurs:scores", candidate) or 0
-                                    if score > best_score:
-                                        best_score = score
-                                        best_livreur = candidate
-                                
-                                if best_livreur:
-                                    r.hset(f"order:{order_id}", "status", "assigned")
-                                    r.hset(f"order:{order_id}", "assigned_driver", best_livreur)
-                                    r.delete(f"candidates:{order_id}")
-                                    print(f"🤖 Attribution automatique: {order_id} -> {best_livreur} (score: {best_score})")
-                
-                time.sleep(2)  # Vérifier toutes les 2 secondes
-            except Exception as e:
-                print(f"Erreur timer: {e}")
-                time.sleep(5)
-    
-    thread = threading.Thread(target=check_expirations, daemon=True)
-    thread.start()
-
-@app.route('/get_order_candidates/<order_id>')
-def get_order_candidates(order_id):
-    """Récupère les candidats pour une commande spécifique"""
+@app.route('/annuler_commande/<order_id>', methods=['POST'])
+def annuler_commande(order_id):
     try:
-        candidates = r.lrange(f"candidates:{order_id}", 0, -1)
-        candidates_with_scores = []
+        username = session.get('username')
         
-        for candidate in candidates:
-            score = get_livreur_score(candidate)
-            candidates_with_scores.append({
-                'id': candidate,
-                'score': score
-            })
+        # Vérifier que la commande appartient bien au client
+        order_data = r.hgetall(f"order:{order_id}")
+        if not order_data:
+            return {'status': 'error', 'message': 'Commande non trouvée'}
         
-        # Trier par score décroissant
-        candidates_with_scores.sort(key=lambda x: x['score'], reverse=True)
+        if order_data.get('client') != username:
+            return {'status': 'error', 'message': 'Vous ne pouvez pas annuler cette commande'}
         
-        return {
-            'status': 'success', 
-            'candidates': candidates_with_scores,
-            'order_status': r.hget(f"order:{order_id}", "status")
-        }
+        # Vérifier si un livreur est déjà assigné
+        if order_data.get('status') == 'assigned':
+            return {'status': 'error', 'message': 'Impossible d\'annuler: un livreur a déjà été assigné'}
+        
+        # Annuler la commande
+        r.hset(f"order:{order_id}", "status", "cancelled")
+        
+        # Supprimer les candidats et timers associés
+        r.delete(f"candidates:{order_id}")
+        r.delete(f"order_timer:{order_id}")
+        
+        publish_event('order_cancelled', {
+            'order_id': order_id,
+            'client': username,
+            'reason': 'Annulé par le client'
+        })
+        
+        print(f"❌ Commande {order_id} annulée par {username}")
+        return {'status': 'success'}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 
@@ -442,5 +539,4 @@ def utility_processor():
 if __name__ == '__main__':
     with app.app_context():
         init_test_users()
-        start_timer_listener()
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, threaded=True)
