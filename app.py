@@ -519,6 +519,117 @@ def annuler_commande(order_id):
         return {'status': 'error', 'message': str(e)}
 
 
+@app.route('/noter_livreur/<order_id>', methods=['POST'])
+def noter_livreur(order_id):
+    try:
+        data = request.get_json()
+        note = data.get('note')
+        username = session.get('username')
+        
+        # Validation de la note
+        if note is None or not (1 <= note <= 5):
+            return {'status': 'error', 'message': 'Note invalide. Doit être entre 1 et 5'}
+        
+        # Vérifier que la commande existe et appartient au client
+        order_data = r.hgetall(f"order:{order_id}")
+        if not order_data:
+            return {'status': 'error', 'message': 'Commande non trouvée'}
+        
+        if order_data.get('client') != username:
+            return {'status': 'error', 'message': 'Vous ne pouvez noter que vos propres commandes'}
+        
+        # Vérifier que la commande est livrée
+        if order_data.get('status') != 'delivered':
+            return {'status': 'error', 'message': 'Vous ne pouvez noter que les commandes livrées'}
+        
+        # Vérifier que la commande n'a pas déjà été notée
+        if r.hexists(f"order:{order_id}", "client_rating"):
+            return {'status': 'error', 'message': 'Cette commande a déjà été notée'}
+        
+        livreur_id = order_data.get('assigned_driver')
+        if not livreur_id:
+            return {'status': 'error', 'message': 'Aucun livreur assigné à cette commande'}
+        
+        # Enregistrer la note
+        r.hset(f"order:{order_id}", "client_rating", note)
+        r.hset(f"order:{order_id}", "rated_at", datetime.now().isoformat())
+        
+        # Mettre à jour la note moyenne du livreur
+        update_livreur_score(livreur_id, float(note))
+        
+        publish_event('driver_rated', {
+            'order_id': order_id,
+            'driver_id': livreur_id,
+            'rating': note,
+            'client': username
+        })
+        
+        print(f"⭐ Livreur {livreur_id} noté {note}/5 pour la commande {order_id}")
+        return {'status': 'success', 'message': f'Merci! Vous avez noté {livreur_id} avec {note} étoiles'}
+        
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+def update_livreur_score(livreur_id, new_rating):
+    """Met à jour la note moyenne d'un livreur"""
+    try:
+        # Récupérer les statistiques actuelles du livreur
+        stats_key = f"livreur_stats:{livreur_id}"
+        current_stats = r.hgetall(stats_key)
+        
+        if not current_stats:
+            # Premier rating
+            r.hset(stats_key, mapping={
+                "total_rating": new_rating,
+                "delivery_count": 1,
+                "avg_rating": round(new_rating, 2)
+            })
+            r.zadd("livreurs:scores", {livreur_id: new_rating})
+        else:
+            # Mettre à jour les statistiques
+            total_rating = float(current_stats.get("total_rating", 0)) + new_rating
+            delivery_count = int(current_stats.get("delivery_count", 0)) + 1
+            avg_rating = round(total_rating / delivery_count, 2)
+            
+            r.hset(stats_key, mapping={
+                "total_rating": total_rating,
+                "delivery_count": delivery_count,
+                "avg_rating": avg_rating
+            })
+            r.zadd("livreurs:scores", {livreur_id: avg_rating})
+        
+        print(f"📊 Statistiques mises à jour pour {livreur_id}: {avg_rating}/5 ({delivery_count} livraisons)")
+        
+    except Exception as e:
+        print(f"Erreur mise à jour score livreur: {e}")
+
+@app.route('/get_livreur_stats/<livreur_id>')
+def get_livreur_stats(livreur_id):
+    """Récupère les statistiques d'un livreur"""
+    try:
+        stats = r.hgetall(f"livreur_stats:{livreur_id}")
+        if not stats:
+            return {
+                'status': 'success',
+                'stats': {
+                    'avg_rating': 5.0,
+                    'delivery_count': 0,
+                    'total_rating': 0
+                }
+            }
+        
+        return {
+            'status': 'success',
+            'stats': {
+                'avg_rating': float(stats.get('avg_rating', 5.0)),
+                'delivery_count': int(stats.get('delivery_count', 0)),
+                'total_rating': float(stats.get('total_rating', 0))
+            }
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
 @app.context_processor
 def utility_processor():
     def has_candidates(order_id):

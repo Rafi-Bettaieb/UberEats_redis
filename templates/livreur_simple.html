@@ -28,6 +28,15 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+        }
+        .stats-number {
+            font-size: 2rem;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -63,6 +72,8 @@
                                     <h6>Commande #{{ order.id }}</h6>
                                     <p class="mb-1">{{ order.articles }}</p>
                                     <small class="text-muted">Restaurant: {{ order.restaurant }}</small>
+                                    <br>
+                                    <small class="text-muted">Client: {{ order.client }}</small>
                                     <div class="mt-2">
                                         <button class="btn btn-success btn-sm" 
                                                 onclick="montrerInteret('{{ order.id }}')"
@@ -115,15 +126,95 @@
                                 <div class="card-body">
                                     <h6>Commande #{{ order.id }}</h6>
                                     <p class="mb-1">{{ order.articles }}</p>
-                                    <button class="btn btn-primary btn-sm" 
-                                            onclick="marquerLivree('{{ order.id }}')">
-                                        ✅ Marquer comme livrée
-                                    </button>
+                                    <small class="text-muted">Client: {{ order.client }}</small>
+                                    <div class="mt-2">
+                                        <button class="btn btn-primary btn-sm" 
+                                                onclick="marquerLivree('{{ order.id }}')">
+                                            ✅ Marquer comme livrée
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             {% else %}
                             <p class="text-muted text-center">Aucune livraison assignée</p>
                             {% endfor %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statistiques du livreur -->
+                <div class="card mt-4 stats-card">
+                    <div class="card-header">
+                        <h5 class="mb-0">⭐ Mes Statistiques</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center text-white" id="livreurStats">
+                            <div class="col-4">
+                                <div class="p-2">
+                                    <div class="stats-number" id="avgRating">--</div>
+                                    <small>Note moyenne</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="p-2">
+                                    <div class="stats-number" id="deliveryCount">--</div>
+                                    <small>Livraisons</small>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="p-2">
+                                    <div class="stats-number" id="totalRating">--</div>
+                                    <small>Total notes</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-center">
+                            <small>
+                                Votre note moyenne détermine votre priorité pour les nouvelles commandes
+                            </small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Historique des livraisons -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h6>📋 Dernières Livraisons</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="deliveryHistory">
+                            {% for order in assigned_orders %}
+                                {% if order.status == 'delivered' %}
+                                <div class="card mb-2">
+                                    <div class="card-body py-2">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <strong>#{{ order.id }}</strong>
+                                                <br>
+                                                <small>{{ order.articles }}</small>
+                                            </div>
+                                            <div class="text-end">
+                                                {% if order.client_rating %}
+                                                <span class="text-warning">
+                                                    {% for i in range(5) %}
+                                                        {% if i < order.client_rating|int %}⭐{% else %}☆{% endif %}
+                                                    {% endfor %}
+                                                </span>
+                                                <br>
+                                                <small class="text-white bg-success px-1 rounded">{{ order.client_rating }}/5</small>
+                                                {% else %}
+                                                <span class="text-muted">En attente de note</span>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            {% if not assigned_orders or not assigned_orders|selectattr('status', 'equalto', 'delivered')|list %}
+                            <p class="text-muted text-center">Aucune livraison terminée</p>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -259,6 +350,10 @@
         }
 
         function marquerLivree(orderId) {
+            if (!confirm(`Marquer la commande #${orderId} comme livrée ?`)) {
+                return;
+            }
+            
             fetch(`/marquer_livree/${orderId}`, { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
@@ -269,8 +364,41 @@
                             assignedOrder.remove();
                         }
                         
-                        showNotification(`✅ Commande #${orderId} marquée comme livrée`, 'success');
+                        showNotification(`✅ Commande #${orderId} marquée comme livrée! Le client pourra vous noter.`, 'success');
+                        
+                        // Mettre à jour les statistiques
+                        loadLivreurStats();
+                        
+                    } else {
+                        showNotification('❌ Erreur: ' + data.message, 'danger');
                     }
+                })
+                .catch(error => {
+                    showNotification('❌ Erreur de connexion', 'danger');
+                    console.error('Erreur:', error);
+                });
+        }
+
+        // Fonction pour charger les statistiques du livreur
+        function loadLivreurStats() {
+            fetch(`/get_livreur_stats/{{ username }}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('avgRating').textContent = data.stats.avg_rating.toFixed(1);
+                        document.getElementById('deliveryCount').textContent = data.stats.delivery_count;
+                        document.getElementById('totalRating').textContent = data.stats.total_rating.toFixed(0);
+                    } else {
+                        document.getElementById('avgRating').textContent = '5.0';
+                        document.getElementById('deliveryCount').textContent = '0';
+                        document.getElementById('totalRating').textContent = '0';
+                    }
+                })
+                .catch(error => {
+                    console.error('Erreur chargement stats:', error);
+                    document.getElementById('avgRating').textContent = '5.0';
+                    document.getElementById('deliveryCount').textContent = '0';
+                    document.getElementById('totalRating').textContent = '0';
                 });
         }
 
@@ -298,8 +426,21 @@
                         handleAssignment(data.data);
                         break;
                     case 'order_created':
-                        // Nouvelle commande créée (pour information)
                         showNotification(`📦 Nouvelle commande #${data.data.order_id} créée`, 'info');
+                        break;
+                    case 'driver_rated':
+                        if (data.data.driver_id === '{{ username }}') {
+                            showNotification(`⭐ Nouvelle note: ${data.data.rating}/5 de ${data.data.client}`, 'success');
+                            loadLivreurStats(); // Recharger les statistiques
+                        }
+                        break;
+                    case 'order_cancelled':
+                        showNotification(`❌ Commande #${data.data.order_id} annulée`, 'warning');
+                        // Retirer de la liste des intérêts si présente
+                        const interestElement = document.getElementById(`interest-${data.data.order_id}`);
+                        if (interestElement) {
+                            interestElement.remove();
+                        }
                         break;
                 }
             };
@@ -324,6 +465,8 @@
                             <h6>Commande #${data.order_id}</h6>
                             <p class="mb-1">1x Pizza, 1x Boisson</p>
                             <small class="text-muted">Restaurant: La Bonne Fourchette</small>
+                            <br>
+                            <small class="text-muted">Client: client_${Math.floor(Math.random() * 100)}</small>
                             <div class="mt-2">
                                 <button class="btn btn-success btn-sm" 
                                         onclick="montrerInteret('${data.order_id}')"
@@ -361,10 +504,13 @@
                         <div class="card-body">
                             <h6>Commande #${data.order_id}</h6>
                             <p class="mb-1">1x Pizza, 1x Boisson</p>
-                            <button class="btn btn-primary btn-sm" 
-                                    onclick="marquerLivree('${data.order_id}')">
-                                ✅ Marquer comme livrée
-                            </button>
+                            <small class="text-muted">Client: client_${Math.floor(Math.random() * 100)}</small>
+                            <div class="mt-2">
+                                <button class="btn btn-primary btn-sm" 
+                                        onclick="marquerLivree('${data.order_id}')">
+                                    ✅ Marquer comme livrée
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -392,6 +538,7 @@
         }
 
         // Initialisation
+        loadLivreurStats();
         connectToEvents();
         
         // Nettoyer à la fermeture de la page
@@ -400,6 +547,11 @@
                 eventSource.close();
             }
         });
+
+        // Rafraîchissement automatique toutes les 2 minutes pour synchronisation
+        setInterval(() => {
+            location.reload();
+        }, 120000);
     </script>
 </body>
 </html>
