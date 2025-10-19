@@ -630,6 +630,158 @@ def get_livreur_stats(livreur_id):
         return {'status': 'error', 'message': str(e)}
 
 
+# Ajouter cette fonction pour calculer la distance
+def calculate_distance(lon1, lat1, lon2, lat2):
+    """Calcule la distance en km entre deux points GPS"""
+    try:
+        from math import radians, sin, cos, sqrt, atan2
+        
+        # Convertir les degrés en radians
+        lon1, lat1, lon2, lat2 = map(radians, [float(lon1), float(lat1), float(lon2), float(lat2)])
+        
+        # Formule de Haversine
+        dlon = lon2 - lon1
+        dlat = lat2 - lat1
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+        c = 2 * atan2(sqrt(a), sqrt(1-a))
+        radius_earth = 6371  # Rayon de la Terre en km
+        
+        return round(radius_earth * c, 2)
+    except Exception as e:
+        print(f"Erreur calcul distance: {e}")
+        return float('inf')
+
+# Ajouter cette route pour mettre à jour la position du livreur
+@app.route('/update_position', methods=['POST'])
+def update_position():
+    try:
+        data = request.get_json()
+        livreur_id = session.get('username')
+        longitude = data.get('longitude')
+        latitude = data.get('latitude')
+        
+        if not longitude or not latitude:
+            return {'status': 'error', 'message': 'Coordonnées manquantes'}
+        
+        # Stocker la position du livreur
+        r.geoadd("livreurs:positions", (longitude, latitude, livreur_id))
+        
+        # Stocker aussi dans un hash pour récupération facile
+        r.hset(f"livreur:{livreur_id}:position", mapping={
+            "longitude": longitude,
+            "latitude": latitude,
+            "updated_at": datetime.now().isoformat()
+        })
+        
+        publish_event('position_updated', {
+            'driver_id': livreur_id,
+            'longitude': longitude,
+            'latitude': latitude
+        })
+        
+        return {'status': 'success', 'message': 'Position mise à jour'}
+        
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+# Modifier la fonction d'attribution automatique pour utiliser la distance
+def schedule_auto_assignment(order_id, delay_seconds):
+    """Programme l'attribution automatique après un délai"""
+    def auto_assign():
+        time.sleep(delay_seconds)
+        
+        # Vérifier si la commande existe toujours et n'est pas déjà assignée
+        order_data = r.hgetall(f"order:{order_id}")
+        if not order_data or order_data.get('status') != 'ready':
+            return
+            
+        candidates = r.lrange(f"candidates:{order_id}", 0, -1)
+        
+        if candidates:
+            # Récupérer les coordonnées du restaurant
+            resto_lon = order_data.get('restaurant_lon', '2.333')  # Default Paris
+            resto_lat = order_data.get('restaurant_lat', '48.865')  # Default Paris
+            
+            # Calculer le meilleur livreur basé sur score et distance
+            best_livreur = None
+            best_score = -1
+            
+            for candidate in candidates:
+                # Récupérer le score
+                driver_score = get_livreur_score(candidate)
+                
+                # Récupérer la position
+                driver_pos = r.hgetall(f"livreur:{candidate}:position")
+                if driver_pos:
+                    # Calculer la distance
+                    distance = calculate_distance(
+                        resto_lon, resto_lat,
+                        driver_pos['longitude'], driver_pos['latitude']
+                    )
+                    
+                    # Score combiné: (score^2) / (distance + 1)
+                    # On donne plus de poids au score et on évite la division par zéro
+                    combined_score = (driver_score ** 2) / (distance + 1)
+                    
+                    if combined_score > best_score:
+                        best_score = combined_score
+                        best_livreur = candidate
+                else:
+                    # Si pas de position, utiliser seulement le score
+                    if driver_score > best_score:
+                        best_score = driver_score
+                        best_livreur = candidate
+            
+            if best_livreur:
+                # Assigner la commande
+                r.hset(f"order:{order_id}", "status", "assigned")
+                r.hset(f"order:{order_id}", "assigned_driver", best_livreur)
+                r.delete(f"candidates:{order_id}")
+                r.delete(f"order_timer:{order_id}")
+                
+                # Récupérer les infos pour le log
+                driver_pos = r.hgetall(f"livreur:{best_livreur}:position")
+                distance_info = ""
+                if driver_pos:
+                    distance = calculate_distance(
+                        resto_lon, resto_lat,
+                        driver_pos['longitude'], driver_pos['latitude']
+                    )
+                    distance_info = f" (distance: {distance}km)"
+                
+                publish_event('auto_assignment', {
+                    'order_id': order_id,
+                    'driver_id': best_livreur,
+                    'score': get_livreur_score(best_livreur),
+                    'distance': distance_info
+                })
+                
+                print(f"🤖 Attribution automatique: {order_id} -> {best_livreur}{distance_info}")
+    
+    thread = threading.Thread(target=auto_assign, daemon=True)
+    thread.start()
+
+# Ajouter une route pour récupérer la position actuelle
+@app.route('/get_my_position')
+def get_my_position():
+    try:
+        livreur_id = session.get('username')
+        position = r.hgetall(f"livreur:{livreur_id}:position")
+        
+        if position:
+            return {
+                'status': 'success',
+                'position': position
+            }
+        else:
+            return {
+                'status': 'success',
+                'position': None
+            }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
 @app.context_processor
 def utility_processor():
     def has_candidates(order_id):
