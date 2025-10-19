@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Espace Restaurant</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-success">
+        <div class="container">
+            <span class="navbar-brand">🍽️ Restaurant - {{ username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Déconnexion</a>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-8 mx-auto">
+                <div class="card">
+                    <div class="card-header">
+                        <h4>📋 Commandes à Préparer</h4>
+                    </div>
+                    <div class="card-body">
+                        <div id="ordersList">
+                            {% for order in orders %}
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-8">
+                                            <h5>Commande #{{ order.id }}</h5>
+                                            <p class="mb-1"><strong>{{ order.articles }}</strong></p>
+                                            <small class="text-muted">Client: {{ order.client }}</small>
+                                        </div>
+                                        <div class="col-md-4 text-end">
+                                            <span class="badge {% if order.status == 'pending' %}bg-warning
+                                                {% elif order.status == 'ready' %}bg-success
+                                                {% else %}bg-secondary{% endif %} mb-2">
+                                                {{ order.status }}
+                                            </span>
+                                            <br>
+                                            {% if order.status == 'pending' %}
+                                            <button class="btn btn-success btn-sm" 
+                                                    onclick="marquerPrete('{{ order.id }}')">
+                                                ✅ Marquer comme prête
+                                            </button>
+                                            {% elif order.status == 'ready' %}
+                                            <small class="text-muted">
+                                                En attente des livreurs...
+                                            </small>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function marquerPrete(orderId) {
+            fetch(`/marquer_prete/${orderId}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        location.reload();
+                    }
+                });
+        }
+        
+        setInterval(() => location.reload(), 5000);
+    </script>
+</body>
+</html>
