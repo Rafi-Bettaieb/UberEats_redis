@@ -403,22 +403,51 @@ def debug_timers():
 
 @app.route('/force_auto_assign/<order_id>', methods=['POST'])
 def force_auto_assign(order_id):
-    """Forcer l'attribution automatique (pour tests)"""
+    """Forcer l'attribution automatique (pour tests) en utilisant le score et la distance"""
     try:
         candidates = r.lrange(f"candidates:{order_id}", 0, -1)
         
         if not candidates:
             return {'status': 'error', 'message': 'Aucun candidat'}
-            
-        # Attribution automatique au meilleur livreur
+
+        # Récupérer les données de la commande pour la localisation du restaurant
+        order_data = r.hgetall(f"order:{order_id}")
+        if not order_data:
+            return {'status': 'error', 'message': 'Commande non trouvée'}
+
+        # Récupérer les coordonnées du restaurant
+        resto_lon = order_data.get('restaurant_lon', '2.333')  # Default Paris
+        resto_lat = order_data.get('restaurant_lat', '48.865')  # Default Paris
+        
+        # Calculer le meilleur livreur basé sur score et distance
         best_livreur = None
-        best_score = -1
+        best_combined_score = -1
         
         for candidate in candidates:
-            score = r.zscore("livreurs:scores", candidate) or 0
-            if score > best_score:
-                best_score = score
-                best_livreur = candidate
+            # Récupérer le score
+            driver_score = get_livreur_score(candidate)
+            
+            # Récupérer la position
+            driver_pos = r.hgetall(f"livreur:{candidate}:position")
+            
+            if driver_pos:
+                # Calculer la distance
+                distance = calculate_distance(
+                    resto_lon, resto_lat,
+                    driver_pos['longitude'], driver_pos['latitude']
+                )
+                
+                # Score combiné: (score^2) / (distance + 1)
+                combined_score = (driver_score ** 2) / (distance + 1)
+                
+                if combined_score > best_combined_score:
+                    best_combined_score = combined_score
+                    best_livreur = candidate
+            else:
+                # Si pas de position, utiliser seulement le score
+                if driver_score > best_combined_score:
+                    best_combined_score = driver_score
+                    best_livreur = candidate
         
         if best_livreur:
             r.hset(f"order:{order_id}", "status", "assigned")
@@ -426,19 +455,38 @@ def force_auto_assign(order_id):
             r.delete(f"candidates:{order_id}")
             r.delete(f"order_timer:{order_id}")
             
+            # Récupérer les infos pour le log/l'événement
+            driver_pos = r.hgetall(f"livreur:{best_livreur}:position")
+            distance_info = ""
+            final_driver_score = get_livreur_score(best_livreur)
+            
+            if driver_pos:
+                distance = calculate_distance(
+                    resto_lon, resto_lat,
+                    driver_pos['longitude'], driver_pos['latitude']
+                )
+                distance_info = f" (distance: {distance}km)"
+
             publish_event('auto_assignment', {
                 'order_id': order_id,
                 'driver_id': best_livreur,
-                'score': best_score
+                'score': final_driver_score,
+                'distance': distance_info
             })
             
-            return {'status': 'success', 'assigned_to': best_livreur}
+            print(f"🤖 [FORCE] Attribution: {order_id} -> {best_livreur}{distance_info}")
+
+            return {'status': 'success', 
+                    'assigned_to': best_livreur,
+                    'score': final_driver_score,
+                    'combined_score': best_combined_score
+                   }
         else:
             return {'status': 'error', 'message': 'Aucun livreur valide'}
             
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
-
+    
 @app.route('/logout')
 def logout():
     session.clear()
