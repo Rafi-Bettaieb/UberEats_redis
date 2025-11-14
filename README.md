@@ -1,7 +1,7 @@
 POC - Système d'assignation en temps réel (Redis vs. MongoDB)
 Ce projet est une Preuve de Concept (POC) pour un système d'assignation de livreurs en temps réel, simulant une plateforme de type UberEats. Il contient deux versions de l'application Flask : une utilisant Redis et l'autre MongoDB.
 
-#⚙️ . Installation (Commune)
+# 1. Installation (Commune)
 Ce projet est développé en Python (testé sur Linux Ubuntu 24.04.3 LTS).
 
 Clonez ce dépôt (si ce n'est pas déjà fait).
@@ -18,7 +18,7 @@ Bash
 
 pip install Flask redis
 
-#🚀 2. Lancement de l'Application
+# 2. Lancement de l'Application
 Vous pouvez lancer la version Redis ou la version MongoDB.
 
 
@@ -48,7 +48,7 @@ Bash
 
 python app_redis.py
 
-#📊 3. Lancer les Tests de Charge (Optionnel)
+# 3. Lancer les Tests de Charge (Optionnel)
 Le projet inclut un fichier locustfile.py pour simuler une charge d'utilisateurs avec Locust.
 
 Installez Locust (s'il n'est pas déjà dans pip install) :
