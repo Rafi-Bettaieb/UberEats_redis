@@ -15,7 +15,7 @@ r = redis.Redis(decode_responses=True)
 def init_test_users():
     try:
         # Ouvrir et lire le fichier JSON
-        with open('donnees_denormalisees.json', 'r', encoding='utf-8') as f:
+        with open('donnees_fusionnees_avec_menus.json', 'r', encoding='utf-8') as f:
             data = json.load(f)
     except FileNotFoundError:
         print("ERREUR: Le fichier 'donnees_denormalisees.json' est introuvable.")
@@ -24,6 +24,7 @@ def init_test_users():
         print("ERREUR: Le fichier 'donnees_denormalisees.json' contient un JSON invalide.")
         return
 
+    
     # === Initialiser les utilisateurs (clients, managers) ===
     for user in data.get('utilisateurs', []):
         username = user.get('username')
