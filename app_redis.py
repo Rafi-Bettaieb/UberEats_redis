@@ -200,6 +200,54 @@ def dashboard():
     
     return redirect(url_for('login'))
 
+@app.route('/get_restaurants_paginated')
+def get_restaurants_paginated():
+    if 'username' not in session:
+        return jsonify({'status': 'error', 'message': 'Non autorisé'}), 401
+    
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 10))
+        
+        # Get all restaurant users
+        all_users = r.hgetall("users")
+        restaurants = []
+        
+        for username, data in all_users.items():
+            if data.endswith(":restaurant"):
+                info = r.hgetall(f"restaurant:info:{username}")
+                restaurants.append({
+                    "id": username,
+                    "name": info.get("name", username)
+                })
+        
+        # Sort by name for consistent pagination
+        restaurants.sort(key=lambda x: x['name'])
+        
+        # Calculate pagination
+        total_restaurants = len(restaurants)
+        total_pages = (total_restaurants + per_page - 1) // per_page
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        
+        paginated_restaurants = restaurants[start_idx:end_idx]
+        
+        return jsonify({
+            'status': 'success', 
+            'restaurants': paginated_restaurants,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total_restaurants': total_restaurants,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            }
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+        
+
 # === NOUVELLE ROUTE: Obtenir la liste des restaurants ===
 @app.route('/get_restaurants')
 def get_restaurants():
@@ -233,6 +281,8 @@ def get_menu(restaurant_id):
     menu = {item: float(price) for item, price in menu_data.items()}
     return jsonify({'status': 'success', 'menu': menu})
 # ======================================================
+
+
 
 # === ROUTE MODIFIÉE: Passer une commande ===
 @app.route('/passer_commande', methods=['POST'])
