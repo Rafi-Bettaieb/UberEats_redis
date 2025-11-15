@@ -145,6 +145,6 @@ Lancez Locust en pointant vers votre application :
 
 locust -f locustfile.py --host http://127.0.0.1:5000
 
-Ouvrez l'interface web de Locust dans votre navigateur (généralement http://localhost:8089) pour démarrer la simulation.
+Ouvrez l'interface web de Locust dans votre navigateur (http://localhost:8089) pour démarrer la simulation.
 
 
