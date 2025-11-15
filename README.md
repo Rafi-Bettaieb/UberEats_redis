@@ -1,66 +1,143 @@
-POC - Système d'assignation en temps réel (Redis vs. MongoDB)
-Ce projet est une Preuve de Concept (POC) pour un système d'assignation de livreurs en temps réel, simulant une plateforme de type UberEats. Il contient deux versions de l'application Flask : une utilisant Redis et l'autre MongoDB.
+# Livraison Express - Application de Livraison de Nourriture
 
-# 1. Installation (Commune)
-Ce projet est développé en Python (testé sur Linux Ubuntu 24.04.3 LTS).
+## Description
+Application web de livraison de nourriture développée avec Flask et Redis. Le système permet aux clients de commander de la nourriture, aux restaurants de préparer les commandes, aux livreurs de livrer et aux managers de superviser le processus.
 
-Clonez ce dépôt (si ce n'est pas déjà fait).
+## Architecture
+- Backend: Flask avec Redis comme base de données
+- Frontend: Templates HTML avec Bootstrap
+- Temps réel: Server-Sent Events (SSE) pour les mises à jour en direct
 
-Créez un environnement virtuel et activez-le :
+## Rôles Utilisateurs
+1. Client - Passer des commandes et suivre leur statut
+2. Restaurant - Préparer les commandes et les marquer comme prêtes
+3. Livreur - Accepter et livrer les commandes
+4. Manager - Superviser et assigner les livreurs
 
-Bash
+## Prérequis
+- Python 3.8+
+- Redis Server
+- Navigateur web moderne
 
-python3 -m venv venv
+## Installation
+
+### 1. Cloner le repository
+git clone <votre-repository-url>
+cd delivery-app
+
+### 2. Créer un environnement virtuel
+python -m venv venv
+
+### 3. Activer l'environnement virtuel
+
+Sur Windows:
+venv\Scripts\activate
+
+Sur Mac/Linux:
 source venv/bin/activate
-Installez les bibliothèques Python requises :
 
-Bash
+### 4. Installer les dépendances
+pip install -r requirements.txt
 
-pip install Flask redis
+Si le fichier requirements.txt n'existe pas, installez manuellement:
+pip install flask redis
 
-# 2. Lancement de l'Application
-Vous pouvez lancer la version Redis ou la version MongoDB.
+### 5. Démarrer Redis Server
 
+Sur Windows:
+- Téléchargez Redis depuis https://redis.io/download
+- Extrayez et lancez redis-server.exe
 
-Installer et compiler Redis (si non disponible localement) :
+Sur Mac (avec Homebrew):
+brew install redis
+redis-server
 
-Bash
+Sur Linux (Ubuntu/Debian):
+sudo apt update
+sudo apt install redis-server
+redis-server
 
-Télécharger la dernière version stable
-wget https://download.redis.io/redis-stable.tar.gz
+### 6. Vérifier que Redis fonctionne
+Ouvrez un nouveau terminal et testez la connexion:
+redis-cli ping
+Vous devriez voir PONG comme réponse.
 
-Extraire l'archive
-tar -xvzf redis-stable.tar.gz
+## Démarrage de l'Application
 
-Compiler les sources
-cd redis-stable
-make
-Démarrer le serveur Redis (dans un terminal) : Assurez-vous d'être dans le dossier redis-stable.
+### 1. Initialiser les données de test
+L'application va automatiquement charger les données depuis donnees_fusionnees_avec_menus.json au premier démarrage.
 
-Bash
-
-src/redis-server
-(Vous devriez voir le logo Redis et un message indiquant que le serveur est prêt).
-
-Lancer l'application Flask (dans un second terminal, à la racine du projet) : N'oubliez pas d'activer votre environnement virtuel (source venv/bin/activate) et puis lancer la commande python3 app_redis.py.
-
-Bash
-
+### 2. Lancer l'application Flask
 python app_redis.py
 
-# 3. Lancer les Tests de Charge (Optionnel)
-Le projet inclut un fichier locustfile.py pour simuler une charge d'utilisateurs avec Locust.
+### 3. Accéder à l'application
+Ouvrez votre navigateur et allez sur:
+http://localhost:5000
 
-Installez Locust (s'il n'est pas déjà dans pip install) :
+## Comptes de Test
 
-Bash
+Client
+- Username: client1
+- Password: pass
+- Role: client
 
-pip install locust
-Assurez-vous que l'une des applications (Redis ou Mongo) est en cours d'exécution (sur http://127.0.0.1:5000).
+Restaurant
+- Username: restaurant1
+- Password: pass
+- Role: restaurant
 
-Lancez Locust en pointant vers votre application :
+Livreur
+- Username: livreur1
+- Password: pass
+- Role: livreur
 
-Bash
+Manager
+- Username: manager
+- Password: pass
+- Role: manager
 
-locust -f locustfile.py --host http://127.0.0.1:5000
-Ouvrez l'interface web de Locust dans votre navigateur (généralement http://localhost:8089) pour démarrer la simulation.
+## Utilisation
+
+Pour les Clients:
+1. Connectez-vous avec un compte client
+2. Cliquez sur "Passer une commande"
+3. Sélectionnez un restaurant et des articles
+4. Suivez le statut de votre commande en temps réel
+5. Notez le livreur après livraison
+
+Pour les Restaurants:
+1. Connectez-vous avec un compte restaurant
+2. Consultez les commandes en attente
+3. Marquez les commandes comme "prêtes" quand elles sont préparées
+
+Pour les Livreurs:
+1. Connectez-vous avec un compte livreur
+2. Consultez les commandes disponibles
+3. Montrez votre intérêt pour les commandes
+4. Mettez à jour votre position GPS
+5. Marquez les commandes comme livrées
+
+Pour les Managers:
+1. Connectez-vous avec un compte manager
+2. Supervisez toutes les commandes
+3. Assignez manuellement des livreurs si nécessaire
+
+## Structure des Fichiers
+delivery-app/
+├── app_redis.py          # Application principale Flask
+├── donnees_fusionnees_avec_menus.json  # Données de test
+├── templates/            # Templates HTML
+│   ├── client_simple.html
+│   ├── restaurant_simple.html
+│   ├── livreur_simple.html
+│   ├── manager_simple.html
+│   └── login.html
+├── requirements.txt      # Dépendances Python
+└── README.md            # Documentation
+
+## Fonctionnalités Temps Réel
+- Mise à jour automatique des statuts de commande
+- Notifications en temps réel
+- Fenêtres de temps pour l'acceptation des livreurs
+- Attribution automatique des livreurs
+
