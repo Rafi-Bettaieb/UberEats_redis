@@ -12,18 +12,17 @@ Application web de livraison de nourriture développée avec Flask et Redis. Le 
 1. Client - Passer des commandes et suivre leur statut
 2. Restaurant - Préparer les commandes et les marquer comme prêtes
 3. Livreur - Accepter et livrer les commandes
-4. Manager - Superviser et assigner les livreurs
+4. Manager - Superviser et assigner les livreurs ou assignation automatique après un certain temps
 
 ## Prérequis
 - Python 3.8+
 - Redis Server
-- Navigateur web moderne
 
 ## Installation
 
 ### 1. Cloner le repository
 en utilisant SSH :  git clone git@github.com:Rafi-Bettaieb/UberEats_redis.git
-en utilisant HTTPS : 
+en utilisant HTTPS : https://github.com/Rafi-Bettaieb/UberEats_redis.git
 cd delivery-app
 
 ### 2. Activer l'environnement virtuel
@@ -58,12 +57,11 @@ redis-cli ping
 Vous devriez voir PONG comme réponse.
 
 ## Démarrage de l'Application
-
-### 1. Initialiser les données de test
-L'application va automatiquement charger les données depuis donnees_fusionnees_avec_menus.json au premier démarrage.
-
-### 2. Lancer l'application Flask
+### 1. Lancer l'application Flask
 python app_redis.py
+
+### 2. Initialiser les données de test
+L'application va automatiquement charger les données depuis donnees_fusionnees_avec_menus.json au premier démarrage.
 
 ### 3. Accéder à l'application
 Ouvrez votre navigateur et allez sur:
@@ -73,22 +71,22 @@ http://localhost:5000
 
 Client
 - Username: client1
-- Password: pass
+- Password: 123456
 - Role: client
 
 Restaurant
 - Username: restaurant1
-- Password: pass
+- Password: 123456
 - Role: restaurant
 
 Livreur
 - Username: livreur1
-- Password: pass
+- Password: 123456
 - Role: livreur
 
 Manager
-- Username: manager
-- Password: pass
+- Username: manager1
+- Password: 123456
 - Role: manager
 
 ## Utilisation
