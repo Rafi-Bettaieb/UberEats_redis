@@ -127,18 +127,31 @@ Pour les Managers:
 3. Assignez manuellement des livreurs si nécessaire
 
 ## Structure des Fichiers
+
 UberEats_redis/
-├── app_redis.py          
+
+├── app_redis.py   
+
 ├── locustfile.py
+
 ├── donnees_fusionnees_avec_menus.json 
+
 ├── venv/ 
-├── templates/           
+
+├── templates/    
+
 │   ├── client_simple.html
+
 │   ├── restaurant_simple.html
+
 │   ├── livreur_simple.html
+
 │   ├── manager_simple.html
+
 │   └── login.html
-├── requirements.txt      
+
+├── requirements.txt   
+
 └── README.md            
 
 ## Fonctionnalités Temps Réel
