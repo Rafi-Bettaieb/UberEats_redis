@@ -132,32 +132,19 @@ Pour les Managers:
 2. Supervisez toutes les commandes
 3. Assignez manuellement des livreurs si nécessaire
 
-## Structure des Fichiers
+### Lancer les Tests de Charge (Optionnel)
+Le projet inclut un fichier locustfile.py pour simuler une charge d'utilisateurs avec Locust.
 
-UberEats_redis/
+Installez Locust :
 
-├── app_redis.py   
+pip install locust
 
-├── locustfile.py
+Assurez-vous que l'applications est en cours d'exécution (sur http://127.0.0.1:5000).
 
-├── donnees_fusionnees_avec_menus.json 
+Lancez Locust en pointant vers votre application :
 
-├── venv/ 
+locust -f locustfile.py --host http://127.0.0.1:5000
 
-├── templates/    
-
-│   ├── client_simple.html
-
-│   ├── restaurant_simple.html
-
-│   ├── livreur_simple.html
-
-│   ├── manager_simple.html
-
-│   └── login.html
-
-├── requirements.txt   
-
-└── README.md            
+Ouvrez l'interface web de Locust dans votre navigateur (généralement http://localhost:8089) pour démarrer la simulation.
 
 
