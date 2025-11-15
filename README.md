@@ -14,6 +14,12 @@ Application web de livraison de nourriture développée avec Flask et Redis. Le 
 3. Livreur - Accepter et livrer les commandes
 4. Manager - Superviser et assigner les livreurs ou assignation automatique après un certain temps
 
+## Fonctionnalités Temps Réel
+- Mise à jour automatique des statuts de commande
+- Notifications en temps réel
+- Fenêtres de temps pour l'acceptation des livreurs
+- Attribution automatique des livreurs
+
 ## Prérequis
 - Python 3.8+
 - Redis Server
@@ -154,9 +160,4 @@ UberEats_redis/
 
 └── README.md            
 
-## Fonctionnalités Temps Réel
-- Mise à jour automatique des statuts de commande
-- Notifications en temps réel
-- Fenêtres de temps pour l'acceptation des livreurs
-- Attribution automatique des livreurs
 
