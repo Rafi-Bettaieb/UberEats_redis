@@ -21,9 +21,11 @@ Application web de livraison de nourriture développée avec Flask et Redis. Le 
 ## Installation
 
 ### 1. Cloner le repository
-en utilisant SSH :  git clone "git@github.com:Rafi-Bettaieb/UberEats_redis.git"
+- en utilisant SSH :
+  git clone git@github.com:Rafi-Bettaieb/UberEats_redis.git
 
-en utilisant HTTPS : https://github.com/Rafi-Bettaieb/UberEats_redis.git
+- en utilisant HTTPS :
+  https://github.com/Rafi-Bettaieb/UberEats_redis.git
 
 cd delivery-app
 
