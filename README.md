@@ -132,7 +132,7 @@ Pour les Managers:
 2. Supervisez toutes les commandes
 3. Assignez manuellement des livreurs si nécessaire
 
-### Lancer les Tests de Charge (Optionnel)
+## Lancer les Tests de Charge (Optionnel)
 Le projet inclut un fichier locustfile.py pour simuler une charge d'utilisateurs avec Locust.
 
 Installez Locust :
