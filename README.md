@@ -47,7 +47,9 @@ Sur Windows:
 - Extrayez et lancez redis-server.exe
 
 Sur Mac (avec Homebrew):
+
 brew install redis
+
 redis-server
 
 Sur Linux (Ubuntu/Debian):
@@ -60,7 +62,9 @@ redis-server
 
 ### 5. Vérifier que Redis fonctionne
 Ouvrez un nouveau terminal et testez la connexion:
+
 redis-cli ping
+
 Vous devriez voir PONG comme réponse.
 
 ## Démarrage de l'Application
@@ -123,17 +127,19 @@ Pour les Managers:
 3. Assignez manuellement des livreurs si nécessaire
 
 ## Structure des Fichiers
-delivery-app/
-├── app_redis.py          # Application principale Flask
-├── donnees_fusionnees_avec_menus.json  # Données de test
-├── templates/            # Templates HTML
+UberEats_redis/
+├── app_redis.py          
+├── locustfile.py
+├── donnees_fusionnees_avec_menus.json 
+├── venv/ 
+├── templates/           
 │   ├── client_simple.html
 │   ├── restaurant_simple.html
 │   ├── livreur_simple.html
 │   ├── manager_simple.html
 │   └── login.html
-├── requirements.txt      # Dépendances Python
-└── README.md            # Documentation
+├── requirements.txt      
+└── README.md            
 
 ## Fonctionnalités Temps Réel
 - Mise à jour automatique des statuts de commande
