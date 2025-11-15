@@ -51,8 +51,11 @@ brew install redis
 redis-server
 
 Sur Linux (Ubuntu/Debian):
+
 sudo apt update
+
 sudo apt install redis-server
+
 redis-server
 
 ### 5. Vérifier que Redis fonctionne
