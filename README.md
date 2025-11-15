@@ -25,10 +25,7 @@ Application web de livraison de nourriture développée avec Flask et Redis. Le 
 git clone <votre-repository-url>
 cd delivery-app
 
-### 2. Créer un environnement virtuel
-python -m venv venv
-
-### 3. Activer l'environnement virtuel
+### 2. Activer l'environnement virtuel
 
 Sur Windows:
 venv\Scripts\activate
@@ -36,13 +33,10 @@ venv\Scripts\activate
 Sur Mac/Linux:
 source venv/bin/activate
 
-### 4. Installer les dépendances
+### 3. Installer les dépendances
 pip install -r requirements.txt
 
-Si le fichier requirements.txt n'existe pas, installez manuellement:
-pip install flask redis
-
-### 5. Démarrer Redis Server
+### 4. Démarrer Redis Server
 
 Sur Windows:
 - Téléchargez Redis depuis https://redis.io/download
@@ -57,7 +51,7 @@ sudo apt update
 sudo apt install redis-server
 redis-server
 
-### 6. Vérifier que Redis fonctionne
+### 5. Vérifier que Redis fonctionne
 Ouvrez un nouveau terminal et testez la connexion:
 redis-cli ping
 Vous devriez voir PONG comme réponse.
