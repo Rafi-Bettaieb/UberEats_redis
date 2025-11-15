@@ -27,7 +27,7 @@ Application web de livraison de nourriture développée avec Flask et Redis. Le 
 - en utilisant HTTPS :
   https://github.com/Rafi-Bettaieb/UberEats_redis.git
 
-cd delivery-app
+cd UberEats_redis
 
 ### 2. Activer l'environnement virtuel
 
